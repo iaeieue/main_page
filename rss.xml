@@ -211,7 +211,7 @@
 &lt;pre&gt;&lt;code&gt;ps aux | grep nginx
 &lt;/code&gt;&lt;/pre&gt;
 &lt;p&gt;将网站目录所有者和组改为与 nginx worker process 相同&lt;/p&gt;
-&lt;pre&gt;&lt;code&gt;chown -R nginx:nginx /var/www/example.com
+&lt;pre&gt;&lt;code&gt;chown -R www-data:www-data /var/www/example.com
 &lt;/code&gt;&lt;/pre&gt;
 &lt;p&gt;将网站目录权限递归设置为 755，文件权限设置为 644&lt;/p&gt;
 &lt;pre&gt;&lt;code&gt;find /var/www/example.com -type d -exec chmod 755 {} \;
@@ -238,21 +238,6 @@ acme.sh --installcert -d example.com \
     --fullchain-file /etc/nginx/ssl/fullchain.cer \
     --key-file /etc/nginx/ssl/example.com.key \
     --ecc
-&lt;/code&gt;&lt;/pre&gt;
-&lt;h1&gt;Alist 反向代理&lt;/h1&gt;
-&lt;p&gt;::github{repo=&quot;alist-org/alist&quot;}&lt;/p&gt;
-&lt;p&gt;如果反代后 Alist 页面白屏，尝试使用 &lt;code&gt;~/&lt;/code&gt;&lt;/p&gt;
-&lt;pre&gt;&lt;code&gt;location ~/ {
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_set_header Host $http_host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header Range $http_range;
-    proxy_set_header If-Range $http_if_range;
-    proxy_redirect off;
-    proxy_pass http://127.0.0.1:5244;
-    client_max_body_size 200m;
-}
 &lt;/code&gt;&lt;/pre&gt;
 &lt;h1&gt;额外配置&lt;/h1&gt;
 &lt;p&gt;配置 https 强制跳转并禁止纯 IP 访问（统一返回 444 响应）&lt;/p&gt;
@@ -300,7 +285,8 @@ acme.sh --installcert -d example.com \
 &lt;p&gt;根据输出的版本信息在 &lt;code&gt;https://nginx.org/en/download.html&lt;/code&gt; 下载对应版本的包体&lt;/p&gt;
 &lt;h2&gt;编译并动态加载 ngx_brotli 模块&lt;/h2&gt;
 &lt;p&gt;安装编译库&lt;/p&gt;
-&lt;pre&gt;&lt;code&gt;apt install build-essential libpcre3 libpcre3-dev zlib1g zlib1g-dev cmake
+&lt;pre&gt;&lt;code&gt;apt install build-essential libpcre3 libpcre3-dev zlib1g \
+    zlib1g-dev cmake
 &lt;/code&gt;&lt;/pre&gt;
 &lt;p&gt;下载并解压对应版本的 nginx 包体&lt;/p&gt;
 &lt;pre&gt;&lt;code&gt;wget -P $HOME https://nginx.org/download/nginx-1.26.2.tar.gz
@@ -320,6 +306,41 @@ ln -s /etc/nginx/modules-available/50-mod-http_brotli.conf \
 &lt;pre&gt;&lt;code&gt;load_module /etc/nginx/modules/ngx_http_brotli_filter_module.so;
 load_module /etc/nginx/modules/ngx_http_brotli_static_module.so;
 &lt;/code&gt;&lt;/pre&gt;
+&lt;h1&gt;cake QoS&lt;/h1&gt;
+&lt;p&gt;测试认为仅针对 sysctl 进行配置似乎无法正确应用到网口上，需要额外针对网口进行参数优化&lt;/p&gt;
+&lt;pre&gt;&lt;code&gt;#!/bin/sh
+
+tc qdisc del dev eth0 root 2&amp;gt;/dev/null
+tc qdisc add dev eth0 root cake \
+    bandwidth 530Mbit \
+    diffserv4 \
+    triple-isolate \
+    nonat \
+    wash \
+    ack-filter \
+    split-gso \
+    rtt 40ms \
+    raw
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;配置持久化应用&lt;/p&gt;
+&lt;pre&gt;&lt;code&gt;[Unit]
+Description=Apply CAKE QoS configuration
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/cake-qos.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+&lt;/code&gt;&lt;/pre&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;code&gt;systemctl daemon-reload&lt;/code&gt;&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;systemctl enable cake-qos&lt;/code&gt;&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;systemctl start cake-qos&lt;/code&gt;&lt;/li&gt;
+&lt;/ul&gt;
 &lt;hr /&gt;
 &lt;h1&gt;参考&lt;/h1&gt;
 &lt;ul&gt;
