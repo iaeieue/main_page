@@ -245,10 +245,16 @@ acme.sh --installcert -d example.com \
     server {
         listen 80 default_server;
         listen [::]:80 default_server;
+
+        listen 443 ssl default_server;
+        listen [::]:443 ssl default_server;
+
         server_name _;
 
+        ssl_reject_handshake on;
         return 444;
-        error_page 400 =444 /;
+
+        error_page 400 497 =444 /;
         location = / {
             return 444;
         }
@@ -257,23 +263,10 @@ acme.sh --installcert -d example.com \
     server {
         listen 80;
         listen [::]:80;
+
         server_name *.example.com;
 
         return 301 https://$host$request_uri;
-    }
-
-    server {
-        listen 443 ssl default_server;
-        listen [::]:443 ssl default_server;
-        server_name _;
-        http2 on;
-        ssl_protocols TLSv1.2 TLSv1.3;
-        ssl_reject_handshake on;
-
-        error_page 400 497 =444 /;
-        location = / {
-            return 444;
-        }
     }
 }
 &lt;/code&gt;&lt;/pre&gt;
@@ -306,13 +299,26 @@ ln -s /etc/nginx/modules-available/50-mod-http_brotli.conf \
 &lt;pre&gt;&lt;code&gt;load_module /etc/nginx/modules/ngx_http_brotli_filter_module.so;
 load_module /etc/nginx/modules/ngx_http_brotli_static_module.so;
 &lt;/code&gt;&lt;/pre&gt;
+&lt;h1&gt;启用 nginx stream 模块&lt;/h1&gt;
+&lt;p&gt;Debian 官方源安装的 nginx 可能没有 stream 模块，需要额外安装并配置&lt;/p&gt;
+&lt;pre&gt;&lt;code&gt;apt install libnginx-mod-stream
+&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;user www-data;
+worker_processes auto;
+
+error_log /var/log/nginx/error.log;
+pid /run/nginx.pid;
+
+include /etc/nginx/modules-enabled/*.conf;
+......
+&lt;/code&gt;&lt;/pre&gt;
 &lt;h1&gt;cake QoS&lt;/h1&gt;
 &lt;p&gt;测试认为仅针对 sysctl 进行配置似乎无法正确应用到网口上，需要额外针对网口进行参数优化&lt;/p&gt;
 &lt;pre&gt;&lt;code&gt;#!/bin/sh
 
 tc qdisc del dev eth0 root 2&amp;gt;/dev/null
 tc qdisc add dev eth0 root cake \
-    bandwidth 530Mbit \
+    bandwidth 630Mbit \
     diffserv4 \
     triple-isolate \
     nonat \
@@ -320,7 +326,7 @@ tc qdisc add dev eth0 root cake \
     ack-filter \
     split-gso \
     rtt 40ms \
-    raw
+    ethernet
 &lt;/code&gt;&lt;/pre&gt;
 &lt;p&gt;配置持久化应用&lt;/p&gt;
 &lt;pre&gt;&lt;code&gt;[Unit]
@@ -336,11 +342,25 @@ RemainAfterExit=yes
 [Install]
 WantedBy=multi-user.target
 &lt;/code&gt;&lt;/pre&gt;
-&lt;ul&gt;
-&lt;li&gt;&lt;code&gt;systemctl daemon-reload&lt;/code&gt;&lt;/li&gt;
-&lt;li&gt;&lt;code&gt;systemctl enable cake-qos&lt;/code&gt;&lt;/li&gt;
-&lt;li&gt;&lt;code&gt;systemctl start cake-qos&lt;/code&gt;&lt;/li&gt;
-&lt;/ul&gt;
+&lt;h1&gt;对精简版 Debian 系统的前置配置集合&lt;/h1&gt;
+&lt;p&gt;精简版系统可能会缺少一些必要配置，这里是解决方法&lt;/p&gt;
+&lt;h2&gt;时区和 ntp 同步配置&lt;/h2&gt;
+&lt;p&gt;精简版 Debian 可能无法激活 ntp 服务，需要先安装 systemd-timesyncd&lt;/p&gt;
+&lt;pre&gt;&lt;code&gt;apt install systemd-timesyncd
+
+timedatectl set-timezone Asia/Shanghai
+timedatectl set-ntp true
+&lt;/code&gt;&lt;/pre&gt;
+&lt;h2&gt;配置内存交换空间&lt;/h2&gt;
+&lt;pre&gt;&lt;code&gt;fallocate -l 4G /swapfile
+chmod 600 /swapfile
+mkswap /swapfile
+
+swapon /swapfile
+echo -e &apos;/swapfile\tnone\tswap\tsw\t0\t0&apos; | tee -a /etc/fstab
+
+swapon --show
+&lt;/code&gt;&lt;/pre&gt;
 &lt;hr /&gt;
 &lt;h1&gt;参考&lt;/h1&gt;
 &lt;ul&gt;
